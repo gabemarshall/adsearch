@@ -1,0 +1,27 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    coderay (1.1.2)
+    colored (1.2)
+    cri (2.10.1)
+      colored (~> 1.2)
+    equatable (0.5.0)
+    method_source (0.9.0)
+    pastel (0.7.2)
+      equatable (~> 0.5.0)
+      tty-color (~> 0.4.0)
+    pry (0.11.3)
+      coderay (~> 1.1.0)
+      method_source (~> 0.9.0)
+    tty-color (0.4.2)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  cri
+  pastel
+  pry
+
+BUNDLED WITH
+   1.16.1

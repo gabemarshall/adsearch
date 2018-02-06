@@ -1,0 +1,171 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'json'
+require 'open3'
+require 'cri'
+require 'pastel'
+
+$base = 'dc=domain,dc=local'
+$useraccount = 'domain\\user'
+$password = ENV['ADSEARCH_DOMAIN_PASSW'] 
+$dc_ip = 'ip-address-of-domain-controller'
+
+# the ldapseach to json is heavily borrowed from https://gist.github.com/bortels/c9931998b5921d696584406ec6ebf6fc
+def ldap_search(cmd)
+    stdin, stdout, stderr = Open3.popen3(cmd)
+    big = {}
+    o = {}
+    raw_output = ""
+    currentkey = ''
+    stdout.each do |line|
+    raw_output << line
+    line.chomp!
+    next if line =~ /^#/
+    if line == '' # end of record
+    if o.size > 0
+        if o.key?('dn')
+        big[o['dn']] = o
+    end
+    end
+    o = {}
+    currentkey = nil
+    next
+    end
+    if line =~ /^\s+(.*)/ # line starting with space is continuation
+    next if currentkey.nil?
+    d = o[currentkey]
+    if d.instance_of? Array
+        i = o[currentkey].size()-1
+        t = o[currentkey][i] + $1
+        o[currentkey][i] = t
+        next
+    else
+        d = d + $1
+        o[currentkey] = d
+        next
+    end
+    end
+    if line =~ /^(.*): (.*)$/
+    k=$1
+    currentkey = k
+    v=$2
+    d = o[k]
+    if d.nil?
+        o[k] = v
+        next
+    end
+    if d.instance_of? Array
+        o[k] << v
+        next
+    end
+    o[k] = [o[k]]
+    o[k] << v
+    next
+    end
+end
+    return output = { 'raw' => raw_output, 'json' => big.to_json, 'pretty' => JSON.pretty_generate(big)}
+  
+   
+end
+
+command = Cri::Command.define do
+    name        'adsearch'
+    usage       'adsearch [options]'
+    summary     'ldapsearch helper script'
+    description 'This script helps simplify ldapsearch'
+  
+    flag   :h,  :help,  'Show this help message' do |value, cmd|
+      puts cmd.help
+      exit 0
+    end
+    
+    flag   :s, :skip, 'Skip prompt before performing search'
+    flag nil, :user, 'Search for users'
+    option :f,  :filter, 'Specify additional LDAP search filter (or a filter from scratch if no other args are passed).
+    
+    Ex: --filter=\'(&(objectclass=user)(cn=john*))\'
+    
+    _', argument: :optional
+    
+    optional   :u, :username,  'Search for user by their username (samaccountName)'
+    optional   :c, :computer,  'Search for computers'
+    optional   :g, :groupname,  'Search for group (Search by group name)'
+    optional :o, :output, 'Output to be printed (raw, json) (no matter what everything is appended to ad-log.json', default: 'json'
+    
+    run do |opts, args, cmd|
+        search_filter = ""
+        filter = ""
+
+        pastel = Pastel.new
+        if opts[:filter]
+            filter = opts.fetch(:filter)
+        end
+        filter = pastel.cyan(filter.strip)
+        if opts[:username]
+            username = opts.fetch(:username)
+            username = pastel.dim.on_blue(username)
+            search_filter = "(&(objectclass=user)(samAccountName=#{username})#{filter})"
+        elsif opts[:computer]
+            computer = opts.fetch(:computer)
+            computer = pastel.dim.on_blue(computer)
+            search_filter = "(&(objectclass=computer)(#{filter}))" 
+        elsif opts[:group]
+            group = opts.fetch(:group)
+            group = pastel.dim.on_blue(group)
+            search_filter = "(&(objectCategory=group)(samaccountname=#{group})#{filter})"
+        elsif opts[:user]
+            user = pastel.dim.on_blue(user)
+            search_filter = "(&(objectclass=user)(#{filter}))"
+        else
+            if filter.length < 5
+                puts "Invalid query, try --help for usage examples"
+                exit
+            end
+            search_filter = filter
+        end
+        
+        cmd = "ldapsearch -E pr=1000/noprompt -xLLL " +
+        "-H 'ldap://#{$dc_ip}' " +
+        "-b '#{$base}' " +
+        "-s sub " +
+        "-D '#{$useraccount}' " +
+        "-w '#{$password}' " +
+        "'#{search_filter}'"
+        
+        puts ""
+        puts cmd 
+        if !opts[:skip]
+            puts "\nShall we run this query? Y/n (--skip to skip this prompt in the future)"
+            answer = $stdin.gets.chomp.upcase
+        else
+            answer = "Y"
+        end
+        if answer == "Y"
+            begin
+                results = ldap_search(pastel.strip(cmd))
+            rescue => exception
+                puts "\nNo results found"
+                exit                
+            end
+            
+            if opts[:output] != 'json'
+                puts results['raw']
+                
+            else
+                if results['pretty'].length <=3
+                    puts "\nNo results found"
+                else
+                    puts results['pretty']
+                end
+            end
+        else
+            exit
+        end
+        cmd_log = File.open("cmd-log.txt", 'a+')
+        cmd_log.write(pastel.strip(cmd)+"\n")
+        File.open("ad-log.json", 'a').write(results['pretty']) 
+    end
+end
+
+command.run(ARGV)
