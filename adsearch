@@ -3,13 +3,45 @@
 require 'rubygems'
 require 'json'
 require 'open3'
-require 'cri'
-require 'pastel'
+
+begin 
+  require 'cri'
+rescue LoadError
+  puts 'Missing required dependency: gem install cri'
+end
+
+begin 
+  require 'pastel'
+rescue LoadError
+  puts 'Missing required dependency: gem install pastel'
+end
 
 $base = 'dc=domain,dc=local'
 $useraccount = 'domain\\user'
 $password = ENV['ADSEARCH_DOMAIN_PASSW'] 
 $dc_ip = 'ip-address-of-domain-controller'
+
+def which(cmd)
+  exts = ENV['PATHEXT'] ? ENV['PATHEXT'].split(';') : ['']
+  ENV['PATH'].split(File::PATH_SEPARATOR).each do |path|
+    exts.each do |ext|
+      exe = File.join(path, "#{cmd}#{ext}")
+      return exe if File.executable?(exe) && !File.directory?(exe)
+    end
+  end
+  nil
+end
+
+binary = 'ldapsearch'
+# Use the which method to check if the binary exists in the current PATH
+if !which(binary)
+  puts "#{binary} does not exist in the current PATH"
+  puts ""
+  err_msg = "apt-get install ldap-utils
+brew install openldap"
+  puts err_msg 
+  exit
+end
 
 # the ldapseach to json is heavily borrowed from https://gist.github.com/bortels/c9931998b5921d696584406ec6ebf6fc
 def ldap_search(cmd)
@@ -158,6 +190,10 @@ command = Cri::Command.define do
                 else
                     puts results['pretty']
                 end
+            end
+            pwd_last_set = Time.at((results['raw'].split("\n").detect { |h| h.include? "pwd"}.split(": ")[1].to_i / 10000000) - 11644473600) rescue nil
+            if pwd_last_set
+              puts pwd_last_set
             end
         else
             exit
