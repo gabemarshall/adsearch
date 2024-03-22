@@ -18,8 +18,12 @@ end
 
 $base = 'dc=domain,dc=local'
 $useraccount = 'domain\\user'
-$password = ENV['ADSEARCH_DOMAIN_PASSW'] 
-$dc_ip = 'ip-address-of-domain-controller'
+$password = ENV['ADSEARCH_PASS']
+$dc_ip = ENV['ADSEARCH_DCIP'] || 'ip-address-of-domain-controller'
+
+def convert_ad_timestamp_to_readable(timestamp)
+  Time.at((timestamp.to_i / 10000000) - 11644473600).to_s.gsub(" ", "__")
+end
 
 def which(cmd)
   exts = ENV['PATHEXT'] ? ENV['PATHEXT'].split(';') : ['']
@@ -182,18 +186,35 @@ command = Cri::Command.define do
             end
             
             if opts[:output] != 'json'
-                puts results['raw']
+              puts results['raw']
                 
             else
+              puts "bye"
                 if results['pretty'].length <=3
                     puts "\nNo results found"
                 else
-                    puts results['pretty']
+                  keys_to_check = ["pwdLastSet", "badPasswordTime", "lockoutTime"]
+                  strings_to_exclude = [":"]
+                  array_of_attributes = results['raw'].split("\n")
+                  array_of_attributes.map! do |element|
+                    key_value_pair = element.split(": ")
+                    if key_value_pair.length == 2 # Ensure element splits into exactly two parts
+                      key, value = key_value_pair
+                      if key && value && keys_to_check.any? { |k| key.include?(k) }
+                        "#{key}: #{convert_ad_timestamp_to_readable(value)}"
+                      else
+                        element
+                      end
+                    else
+                      element
+                    end
+                  end
+									filtered_array = array_of_attributes.reject do |element|
+										strings_to_exclude.any? { |string| !element.include?(string) }
+									end
+
+                  puts filtered_array
                 end
-            end
-            pwd_last_set = Time.at((results['raw'].split("\n").detect { |h| h.include? "pwd"}.split(": ")[1].to_i / 10000000) - 11644473600) rescue nil
-            if pwd_last_set
-              puts pwd_last_set
             end
         else
             exit
